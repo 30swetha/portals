@@ -199,7 +199,7 @@
       }
       if (t === 'Requests' && k === 'preview') {
         return r.previewable && (r.mimeType || '').startsWith('image/')
-          ? `<img class="thumb-preview" src="${esc(r.logoUrl)}">`
+          ? `<img class="thumb-preview" src="${esc(r.logoUrl)}" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">`
           : (r.logoUrl ? '<span class="hint">Click "Open file"</span>' : '<span class="hint">No logo</span>');
       }
       if (t === 'Files' && k === 'url') {
@@ -207,7 +207,7 @@
       }
       if (t === 'Files' && k === 'preview') {
         const ok = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif', 'image/x-icon'].includes(r.mimeType);
-        return ok ? `<img class="thumb-preview" src="/api/files/${esc(r.fileId)}">` : '<span class="hint">Click "Open file"</span>';
+        return ok ? `<img class="thumb-preview" src="/api/files/${esc(r.fileId)}" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">` : '<span class="hint">Click "Open file"</span>';
       }
       if (MONEY.has(k)) {
         return `<span class="peso font-weight:600;">${esc(peso(r[k]))}</span>`;

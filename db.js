@@ -22,10 +22,51 @@ const STORAGE_DIR = path.join(SHARED_DIR, 'storage', 'logos');
 const JOURNAL = path.join(SHARED_DIR, '.pending-changes.jsonl');
 const LOCK = path.join(SHARED_DIR, '.db.lock');
 
+const memoryFiles = new Map();
+
+function saveInMemoryFile(fileId, buffer, mimeType, originalName) {
+  if (!fileId || !buffer) return;
+  memoryFiles.set(fileId, {
+    buffer,
+    mimeType: mimeType || 'image/png',
+    originalName: originalName || 'logo.png',
+    dataUrl: `data:${mimeType || 'image/png'};base64,${buffer.toString('base64')}`
+  });
+}
+
+function getInMemoryFile(fileId) {
+  return memoryFiles.get(fileId) || null;
+}
+
 function initStorage() {
   try {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+    // Pre-load bundled logos into memoryFiles so they are always in memory & never 404
+    const logoDirs = [
+      path.join(__dirname, 'shared', 'storage', 'logos'),
+      STORAGE_DIR
+    ];
+    logoDirs.forEach(dir => {
+      if (fs.existsSync(dir)) {
+        try {
+          const files = fs.readdirSync(dir);
+          files.forEach(f => {
+            const fileId = f.replace(/\.[^.]+$/, '');
+            const fullPath = path.join(dir, f);
+            try {
+              if (fs.statSync(fullPath).isFile()) {
+                const buf = fs.readFileSync(fullPath);
+                const ext = path.extname(f).slice(1).toLowerCase();
+                const mime = ext === 'png' ? 'image/png' : (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : 'image/png';
+                saveInMemoryFile(fileId, buf, mime, f);
+              }
+            } catch (e) {}
+          });
+        } catch (e) {}
+      }
+    });
 
     if (IS_VERCEL) {
       const seedDb = path.join(__dirname, 'shared', 'CallerID-Database.xlsx');
@@ -146,6 +187,24 @@ function applyToState(s, e) {
 async function readAll() {           // workbook + changes still waiting in the journal
   const s = JSON.parse(JSON.stringify(await loadWorkbookState()));
   for (const e of readJournal()) applyToState(s, e);
+  s.files = (s.files || []).map(f => {
+    const mem = memoryFiles.get(f.fileId);
+    if (mem && mem.dataUrl) {
+      return { ...f, dataUrl: mem.dataUrl };
+    }
+    // Attempt disk read to populate memory cache & dataUrl
+    let full = path.join(SHARED_DIR, f.storagePath || '');
+    if (!fs.existsSync(full)) full = path.join(__dirname, 'shared', f.storagePath || '');
+    if (fs.existsSync(full)) {
+      try {
+        const buf = fs.readFileSync(full);
+        const mime = f.mimeType || 'image/png';
+        saveInMemoryFile(f.fileId, buf, mime, f.originalName);
+        return { ...f, dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
+      } catch (e) {}
+    }
+    return f;
+  });
   return s;
 }
 
@@ -185,12 +244,18 @@ function imageIndex(wb, buffer, extension) {       // identical logo = stored on
 }
 function preview(wb, ws, rowNo, col, file) {
   const ext = file && EXCEL_IMG[file.mimeType];
+  const mem = file && memoryFiles.get(file.fileId);
   let full = file && path.join(SHARED_DIR, file.storagePath);
   if (full && !fs.existsSync(full)) {
     full = path.join(__dirname, 'shared', file.storagePath);
   }
-  if (ext && fs.existsSync(full)) ws.addImage(imageIndex(wb, fs.readFileSync(full), ext), { tl: { col: col - 1 + 0.1, row: rowNo - 1 + 0.1 }, ext: { width: 90, height: 56 } });
-  else if (file) ws.getCell(rowNo, col).value = 'Click "Open file" to view';
+  if (ext && mem && mem.buffer) {
+    ws.addImage(imageIndex(wb, mem.buffer, ext), { tl: { col: col - 1 + 0.1, row: rowNo - 1 + 0.1 }, ext: { width: 90, height: 56 } });
+  } else if (ext && fs.existsSync(full)) {
+    ws.addImage(imageIndex(wb, fs.readFileSync(full), ext), { tl: { col: col - 1 + 0.1, row: rowNo - 1 + 0.1 }, ext: { width: 90, height: 56 } });
+  } else if (file) {
+    ws.getCell(rowNo, col).value = 'Click "Open file" to view';
+  }
   ws.getRow(rowNo).height = 48;
 }
 const link = (cell, url) => { cell.value = { text: 'Open file', hyperlink: url }; cell.font = LINK_FONT; };
@@ -259,4 +324,4 @@ function getStatus() {
   return { database: DB_PATH, pending: readJournal().length, lastFlush: flushInfo.lastFlush, error: flushInfo.error, readError };
 }
 
-module.exports = { cfg, SHARED_DIR, STORAGE_DIR, DB_PATH, newId, enqueue, readAll, getStatus, startBackground, flush };
+module.exports = { cfg, SHARED_DIR, STORAGE_DIR, DB_PATH, newId, enqueue, readAll, getStatus, startBackground, flush, saveInMemoryFile, getInMemoryFile };

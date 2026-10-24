@@ -388,7 +388,7 @@
       callTimerInterval = setInterval(updateCallDuration, 1000);
 
       const avatar = callerObj.logoUrl
-        ? `<img src="${esc(callerObj.logoUrl)}" alt="">`
+        ? `<img src="${esc(callerObj.logoUrl)}" alt="" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">`
         : esc(initials(callerObj.brandName || callerObj.display));
 
       screen.innerHTML = `
@@ -442,7 +442,7 @@
       if (r.registered) {
         // VERIFIED ENTERPRISE CALL
         const logoHtml = r.logoUrl
-          ? `<img src="${esc(r.logoUrl)}" alt="${esc(r.brandName)}">`
+          ? `<img src="${esc(r.logoUrl)}" alt="${esc(r.brandName)}" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">`
           : esc(initials(r.brandName));
 
         screen.className = 'phone-screen';

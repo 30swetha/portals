@@ -94,7 +94,7 @@ function showToast(title, message, type = 'info', duration = 4000) {
 // Modern enterprise "what the customer will see" card
 function callerCard(o) {
   const lg = o.logoUrl
-    ? `<img src="${esc(o.logoUrl)}" alt="${esc(o.brandName || 'Logo')}">`
+    ? `<img src="${esc(o.logoUrl)}" alt="${esc(o.brandName || 'Logo')}" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">`
     : esc(initials(o.brandName));
   const isVerified = o.verified !== false;
   return `

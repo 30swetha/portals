@@ -845,7 +845,7 @@
     // Render Individual Registration Card
     function reqHtml(r) {
       const th = r.logoUrl && r.previewable
-        ? `<img src="${esc(r.logoUrl)}" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">`
+        ? `<img src="${esc(r.logoUrl)}" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;" onerror="this.onerror=null;this.src='/shared/assets/mobileum-logo.png';">`
         : (r.logoUrl ? 'File' : `<span style="font-weight:700;color:var(--primary-blue);">${esc(initials(r.brandName))}</span>`);
 
       const rows = (r.numbers || []).map(n => `
