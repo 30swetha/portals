@@ -1,13 +1,15 @@
 {
   "version": 2,
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.js" },
-    { "source": "/api", "destination": "/api/index.js" },
-    { "source": "/sheet.html", "destination": "/operator/sheet.html" },
-    { "source": "/operator", "destination": "/operator/index.html" },
-    { "source": "/enterprise", "destination": "/enterprise/index.html" },
-    { "source": "/customer", "destination": "/customer/index.html" },
-    { "source": "/", "destination": "/index.html" }
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "index.js"
+    }
   ]
 }
