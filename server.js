@@ -138,10 +138,68 @@ app.post('/api/packages', only('operator'), wrap(async (req, res) => {
 app.patch('/api/requests/:id/status', only('operator'), wrap(async (req, res) => {
   const { status } = req.body || {};
   if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'status must be approved or rejected' });
-  const s = await db.readAll();
-  if (!s.requests.some(r => r.requestId === req.params.id)) return res.status(404).json({ error: 'request not found' });
   await db.enqueue({ t: 'status', requestId: req.params.id, status, at: new Date().toISOString() });
   res.json({ requestId: req.params.id, status });
+}));
+
+// SERVERLESS SYNC: Re-hydrates requests and status overrides across cold/ephemeral Vercel lambda containers
+app.post('/api/sync', wrap(async (req, res) => {
+  const { requests = [], statusOverrides = {} } = req.body || {};
+  const s = await db.readAll();
+  const existingReqIds = new Set(s.requests.map(r => r.requestId));
+  let addedCount = 0;
+
+  for (const r of requests) {
+    if (!r || !r.requestId) continue;
+    if (!existingReqIds.has(r.requestId)) {
+      const finalStatus = statusOverrides[r.requestId] || r.status || 'pending';
+      const row = {
+        requestId: r.requestId,
+        packageId: r.packageId || '',
+        brandName: r.brandName || '',
+        tagline: r.tagline || '',
+        status: finalStatus,
+        logoFileId: r.logoFileId || '',
+        createdAt: r.createdAt || new Date().toISOString(),
+        departments: r.departments || '',
+        numbersCount: r.numbersCount || (r.numbers ? r.numbers.length : 0),
+        monthlyFeePHP: r.monthlyFeePHP || 0,
+        vatPHP: r.vatPHP || 0,
+        totalPHP: r.totalPHP || 0
+      };
+      const numbers = (r.numbers || []).map(n => ({
+        numberId: n.numberId || db.newId('NUM'),
+        requestId: r.requestId,
+        brandName: r.brandName,
+        department: n.department,
+        phoneE164: n.phoneE164,
+        phoneDisplay: n.phoneDisplay,
+        numberType: n.numberType,
+        status: finalStatus,
+        createdAt: row.createdAt
+      }));
+      if (r.logoFileId && r.logoUrl && r.logoUrl.startsWith('data:')) {
+        try {
+          const match = r.logoUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            const buf = Buffer.from(match[2], 'base64');
+            db.saveInMemoryFile(r.logoFileId, buf, match[1], r.fileName || 'logo.png');
+          }
+        } catch (e) {}
+      }
+      await db.enqueue({ t: 'req', row, file: null, numbers });
+      existingReqIds.add(r.requestId);
+      addedCount++;
+    }
+  }
+
+  for (const [reqId, status] of Object.entries(statusOverrides)) {
+    if (['approved', 'rejected'].includes(status)) {
+      await db.enqueue({ t: 'status', requestId: reqId, status, at: new Date().toISOString() });
+    }
+  }
+
+  res.json({ ok: true, synced: addedCount });
 }));
 
 // ENTERPRISE: register a bank (official name + logo) with phone numbers per department (multipart; field "logo" + "departments" JSON)

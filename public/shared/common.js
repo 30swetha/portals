@@ -215,3 +215,198 @@ function removeFromSharedList(key, item) {
   return current;
 }
 
+// ==========================================================================
+// Cross-Portal Synchronization & State Persistence (Vercel Serverless Resilient)
+// Prevents requests from disappearing when polling different lambda containers
+// ==========================================================================
+const MOBILEUM_SYNC_KEY = 'mobileum_persisted_requests';
+const MOBILEUM_STATUS_KEY = 'mobileum_status_overrides';
+
+const syncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('mobileum_sync_channel') : null;
+
+function getClientRequests() {
+  try {
+    const raw = localStorage.getItem(MOBILEUM_SYNC_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveClientRequest(req) {
+  if (!req || !req.requestId) return;
+  const list = getClientRequests();
+  const idx = list.findIndex(r => r.requestId === req.requestId);
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...req };
+  } else {
+    list.push(req);
+  }
+  try {
+    localStorage.setItem(MOBILEUM_SYNC_KEY, JSON.stringify(list));
+  } catch (e) {}
+
+  if (syncChannel) {
+    try { syncChannel.postMessage({ type: 'sync_update', requestId: req.requestId }); } catch (e) {}
+  }
+  syncWithServer();
+}
+
+function getStatusOverrides() {
+  try {
+    const raw = localStorage.getItem(MOBILEUM_STATUS_KEY);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') return obj;
+    }
+  } catch (e) {}
+  return {};
+}
+
+function saveStatusOverride(requestId, status) {
+  if (!requestId || !status) return;
+  const overrides = getStatusOverrides();
+  overrides[requestId] = status;
+  try {
+    localStorage.setItem(MOBILEUM_STATUS_KEY, JSON.stringify(overrides));
+  } catch (e) {}
+
+  const list = getClientRequests();
+  const req = list.find(r => r.requestId === requestId);
+  if (req) {
+    req.status = status;
+    if (req.numbers) req.numbers.forEach(n => { n.status = status; });
+    try { localStorage.setItem(MOBILEUM_SYNC_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  if (syncChannel) {
+    try { syncChannel.postMessage({ type: 'status_override', requestId, status }); } catch (e) {}
+  }
+  syncWithServer();
+}
+
+function mergeRequests(serverRequests) {
+  const serverList = Array.isArray(serverRequests) ? serverRequests : [];
+  const clientList = getClientRequests();
+  const overrides = getStatusOverrides();
+
+  const map = new Map();
+
+  // 1. Ingest server requests
+  serverList.forEach(r => {
+    if (r && r.requestId) {
+      const copy = { ...r };
+      if (overrides[copy.requestId]) {
+        copy.status = overrides[copy.requestId];
+        if (copy.numbers) copy.numbers.forEach(n => { n.status = overrides[copy.requestId]; });
+      }
+      map.set(copy.requestId, copy);
+    }
+  });
+
+  // 2. Ingest client requests (preserves newly submitted requests across cold lambda instances)
+  let missingFromServer = false;
+  clientList.forEach(clientReq => {
+    if (!clientReq || !clientReq.requestId) return;
+    if (!map.has(clientReq.requestId)) {
+      const copy = { ...clientReq };
+      if (overrides[copy.requestId]) {
+        copy.status = overrides[copy.requestId];
+        if (copy.numbers) copy.numbers.forEach(n => { n.status = overrides[copy.requestId]; });
+      }
+      map.set(copy.requestId, copy);
+      missingFromServer = true;
+    } else {
+      const existing = map.get(clientReq.requestId);
+      if (!existing.logoUrl && clientReq.logoUrl) {
+        existing.logoUrl = clientReq.logoUrl;
+      }
+      if (overrides[clientReq.requestId]) {
+        existing.status = overrides[clientReq.requestId];
+        if (existing.numbers) existing.numbers.forEach(n => { n.status = overrides[clientReq.requestId]; });
+      }
+    }
+  });
+
+  if (missingFromServer) {
+    syncWithServer();
+  }
+
+  return Array.from(map.values());
+}
+
+function mergeNumbers(serverNumbers) {
+  const list = Array.isArray(serverNumbers) ? serverNumbers.slice() : [];
+  const clientRequests = getClientRequests();
+  const overrides = getStatusOverrides();
+  const deletedNums = getSharedList('deleted_numbers');
+
+  clientRequests.forEach(r => {
+    const status = overrides[r.requestId] || r.status;
+    if (status === 'approved' && Array.isArray(r.numbers)) {
+      r.numbers.forEach(n => {
+        if (!list.some(x => x.phoneE164 === n.phoneE164) && !deletedNums.includes(n.phoneE164)) {
+          list.push({
+            phoneE164: n.phoneE164,
+            phoneDisplay: n.phoneDisplay,
+            department: n.department,
+            brandName: r.brandName,
+            status: 'approved'
+          });
+        }
+      });
+    }
+  });
+
+  return list;
+}
+
+function lookupLocalNumber(phoneInput) {
+  const clientRequests = getClientRequests();
+  const overrides = getStatusOverrides();
+  const norm = typeof PH !== 'undefined' ? PH.normalize(phoneInput) : null;
+  const e164 = norm && norm.ok ? norm.e164 : String(phoneInput || '').replace(/[^0-9+]/g, '');
+
+  for (const r of clientRequests) {
+    const status = overrides[r.requestId] || r.status;
+    if (status === 'approved' && Array.isArray(r.numbers)) {
+      const numHit = r.numbers.find(n => n.phoneE164 === e164);
+      if (numHit) {
+        return {
+          registered: true,
+          verified: true,
+          brandName: r.brandName,
+          tagline: r.tagline || '',
+          department: numHit.department,
+          display: numHit.phoneDisplay || (norm && norm.display) || e164,
+          logoUrl: r.logoUrl || null,
+          numberType: numHit.numberType || (norm && norm.type) || 'Phone'
+        };
+      }
+    }
+  }
+  return null;
+}
+
+let syncTimer = null;
+function syncWithServer() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    try {
+      const requests = getClientRequests();
+      const statusOverrides = getStatusOverrides();
+      if (!requests.length && !Object.keys(statusOverrides).length) return;
+      await api('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests, statusOverrides })
+      });
+    } catch (e) {
+      // Non-blocking sync attempt
+    }
+  }, 400);
+}
+
+

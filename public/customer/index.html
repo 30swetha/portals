@@ -436,6 +436,13 @@
         r = { registered: false, reason: 'invalid', message: e.message };
       }
 
+      if (!r || !r.registered) {
+        const localHit = lookupLocalNumber(n);
+        if (localHit) {
+          r = localHit;
+        }
+      }
+
       const disp = r.display || n;
       const screen = $('scr');
 
@@ -599,7 +606,8 @@
         $('lOp').href = info.operatorUrl;
         $('lEn').href = info.enterpriseUrl;
 
-        const list = await api('/api/numbers');
+        const serverNumbers = await api('/api/numbers');
+        const list = mergeNumbers(serverNumbers);
         const regEl = $('reg');
 
         if (!list.length) {
@@ -635,6 +643,14 @@
     idle();
     load();
     setInterval(load, 3000);
+
+    if (syncChannel) {
+      syncChannel.onmessage = e => {
+        if (e.data && (e.data.type === 'sync_update' || e.data.type === 'status_override')) {
+          load();
+        }
+      };
+    }
   </script>
 </body>
 </html>

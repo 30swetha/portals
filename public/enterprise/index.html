@@ -796,6 +796,7 @@
 
       try {
         const r = await api('/api/requests', { method: 'POST', body: fd });
+        saveClientRequest(r);
         m.className = 'msg good';
         m.innerHTML = `<strong>Registration Submitted!</strong> ${r.numbersCount} numbers submitted under <code>${r.requestId}</code>. Waiting for operator approval.`;
         showToast('Registration Submitted', `${brand} successfully submitted for approval.`, 'success', 5000);
@@ -1097,7 +1098,7 @@
 
         const rq = await api('/api/requests');
         const deletedReqs = getSharedList('deleted_requests');
-        myRequests = rq;
+        myRequests = mergeRequests(rq);
 
         // Detect real-time status transitions
         if (!isInitialLoad) {
@@ -1173,6 +1174,14 @@
     load();
     setupScrollSpy();
     setInterval(load, 3000);
+
+    if (syncChannel) {
+      syncChannel.onmessage = e => {
+        if (e.data && (e.data.type === 'sync_update' || e.data.type === 'status_override')) {
+          load();
+        }
+      };
+    }
   </script>
 </body>
 </html>
