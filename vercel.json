@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "buildCommand": "echo Ready",
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/api", "destination": "/api/index.js" },
+    { "source": "/shared/(.*)", "destination": "/shared/$1" },
+    { "source": "/operator/(.*)", "destination": "/operator/$1" },
+    { "source": "/operator", "destination": "/operator/index.html" },
+    { "source": "/enterprise/(.*)", "destination": "/enterprise/$1" },
+    { "source": "/enterprise", "destination": "/enterprise/index.html" },
+    { "source": "/customer/(.*)", "destination": "/customer/$1" },
+    { "source": "/customer", "destination": "/customer/index.html" },
+    { "source": "/sheet.html", "destination": "/operator/sheet.html" },
+    { "source": "/", "destination": "/index.html" }
+  ]
+}
