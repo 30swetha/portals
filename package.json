@@ -7,7 +7,6 @@
     "start": "node start.js",
     "dev": "node start.js",
     "unified": "node server.js",
-    "build": "echo Build ready",
     "operator": "node server.js operator",
     "enterprise": "node server.js enterprise",
     "customer": "node server.js customer"
